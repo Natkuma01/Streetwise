@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { CalendarDays, ChevronLeft, ChevronRight, ExternalLink, MapPin, Plus, SlidersHorizontal, X } from "lucide-react";
+import { CalendarDays, ChevronLeft, ChevronRight, ExternalLink, MapPin, Plus, ShieldCheck, SlidersHorizontal, X } from "lucide-react";
 
 const CATEGORIES = ["Tech", "Finance", "Marketing", "Business", "Entrepreneurship", "Education", "Arts & Culture", "Community", "Career", "Others"];
 const COLORS = {
@@ -14,7 +14,7 @@ const isoDay = (date) => `${date.getFullYear()}-${String(date.getMonth() + 1).pa
 const sameDay = (iso, date) => iso.slice(0, 10) === isoDay(date);
 const displayTime = (iso) => new Intl.DateTimeFormat("en-US", { hour: "numeric", minute: "2-digit", timeZone: "America/New_York" }).format(new Date(iso));
 
-function App() {
+function App({ onReviewRules }) {
   const [month, setMonth] = useState(() => new Date(new Date().getFullYear(), new Date().getMonth(), 1));
   const [events, setEvents] = useState([]);
   const [filters, setFilters] = useState([]);
@@ -75,6 +75,9 @@ function App() {
     <header className="topbar">
       <a className="brand" href="#" aria-label="Streetwise NYC home"><span className="brand-mark"><CalendarDays size={20} /></span><span>Streetwise <b>NYC</b></span></a>
       <p className="tagline">A community calendar for curious New Yorkers.</p>
+      <button className="rules-link" type="button" onClick={onReviewRules}>
+        <ShieldCheck size={16} /> Community rules
+      </button>
       <button className="primary-button" onClick={() => openAdd()}><Plus size={18} /> Add an event</button>
     </header>
 

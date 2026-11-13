@@ -2,6 +2,8 @@
 
 Streetwise NYC is a community calendar for events in New York City. People can browse events by month, filter them by category, and share an event without creating an account.
 
+Before opening the calendar for the first time, visitors see the community rules and choose whether to accept them. Acceptance is stored only in the current browser; no account or sign-in is required. The calendar header always includes a link for reviewing the rules later.
+
 This guide is written for people who have not used Django or React before. Follow the steps in order.
 
 ## What you need before you start
