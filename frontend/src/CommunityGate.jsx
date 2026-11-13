@@ -15,8 +15,15 @@ const RULES = [
     copy: "Don’t post spam, scams, or misleading links. Share things that genuinely help the community.",
   },
   {
-    title: "Protect people’s privacy.",
-    copy: "Don’t share anyone’s private, confidential, or sensitive information.",
+    title: "Protect your own privacy.",
+    copy: (
+      <>
+        This is an early version of the platform and does not yet have all of the
+        security protections we plan to add. Strengthening security is our next
+        priority. For now, <mark style={{ background: "#bfe8d3", color: "#16251f", borderRadius: 3, padding: "0.08em 0.25em" }}>DO NOT SHARE SENSITIVE INFORMATION</mark> or anything
+        you would not be comfortable having seen publicly.
+      </>
+    ),
   },
 ];
 
