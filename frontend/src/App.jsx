@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { CalendarDays, ChevronLeft, ChevronRight, ExternalLink, MapPin, Plus, ShieldCheck, SlidersHorizontal, X } from "lucide-react";
+import { eventIdFromHash, filterEventsByCategories, monthWindow } from "./calendar";
 
 const CATEGORIES = ["Tech", "Finance", "Marketing", "Business", "Entrepreneurship", "Education", "Arts & Culture", "Community", "Career", "Others"];
 const COLORS = {
@@ -24,19 +25,54 @@ function App({ onReviewRules }) {
   const [confirming, setConfirming] = useState(false);
   const [errors, setErrors] = useState({});
   const [loading, setLoading] = useState(true);
+  const [detailId, setDetailId] = useState(() => eventIdFromHash(window.location.hash));
+  const [detailEvent, setDetailEvent] = useState(null);
+  const [detailLoading, setDetailLoading] = useState(false);
 
   const loadEvents = async () => {
     setLoading(true);
     try {
-      const response = await fetch("/api/events/");
+      const params = new URLSearchParams(monthWindow(month));
+      const response = await fetch(`/api/events/?${params}`);
       const data = await response.json();
       setEvents(data.events || []);
     } finally { setLoading(false); }
   };
 
-  useEffect(() => { loadEvents(); }, []);
+  useEffect(() => { loadEvents(); }, [month]);
 
-  const visibleEvents = useMemo(() => filters.length ? events.filter((event) => event.categories.some((category) => filters.includes(category))) : events, [events, filters]);
+  useEffect(() => {
+    const syncDetail = () => setDetailId(eventIdFromHash(window.location.hash));
+    window.addEventListener("hashchange", syncDetail);
+    window.addEventListener("popstate", syncDetail);
+    return () => {
+      window.removeEventListener("hashchange", syncDetail);
+      window.removeEventListener("popstate", syncDetail);
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!detailId) {
+      setDetailEvent(null);
+      return;
+    }
+    const cached = events.find((event) => event.id === detailId);
+    if (cached) {
+      setDetailEvent(cached);
+      return;
+    }
+    setDetailLoading(true);
+    fetch(`/api/events/${detailId}/`)
+      .then((response) => response.ok ? response.json() : Promise.reject(new Error("not found")))
+      .then((data) => setDetailEvent(data.event))
+      .catch(() => setDetailEvent(null))
+      .finally(() => setDetailLoading(false));
+  }, [detailId, events]);
+
+  const visibleEvents = useMemo(
+    () => filterEventsByCategories(events, filters),
+    [events, filters],
+  );
   const days = useMemo(() => {
     const first = new Date(month.getFullYear(), month.getMonth(), 1);
     const start = new Date(first); start.setDate(1 - first.getDay());
@@ -50,6 +86,18 @@ function App({ onReviewRules }) {
   };
   const openAdd = (date = null) => {
     setForm({ ...emptyForm, date: date ? isoDay(date) : "" }); setErrors({}); setConfirming(false); setModal("add");
+  };
+  const openEvent = (event) => {
+    window.history.pushState(null, "", `#event/${event.id}`);
+    setDetailEvent(event);
+    setDetailId(event.id);
+    setModal(null);
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  };
+  const closeEvent = () => {
+    window.history.pushState(null, "", window.location.pathname);
+    setDetailId(null);
+    setDetailEvent(null);
   };
   const validate = () => {
     const next = {};
@@ -70,6 +118,10 @@ function App({ onReviewRules }) {
     if (!response.ok) { setErrors(data.errors || { form: "Something went wrong. Please try again." }); setConfirming(false); return; }
     setEvents((current) => [...current, data.event]); setConfirming(false); setModal(null);
   };
+
+  if (detailId) {
+    return <EventDetailsPage event={detailEvent} loading={detailLoading} onBack={closeEvent} onReviewRules={onReviewRules} />;
+  }
 
   return <div className="app-shell">
     <header className="topbar">
@@ -98,9 +150,11 @@ function App({ onReviewRules }) {
           const dayEvents = visibleEvents.filter((event) => sameDay(event.start_at, day));
           const outside = day.getMonth() !== month.getMonth();
           const today = isoDay(day) === isoDay(new Date());
-          return <div className={`day-cell ${outside ? "outside" : ""}`} key={isoDay(day)} onDoubleClick={() => openAdd(day)}>
+          const startOfToday = new Date(); startOfToday.setHours(0, 0, 0, 0);
+          const past = day < startOfToday;
+          return <div className={`day-cell ${outside ? "outside" : ""} ${past ? "past" : ""}`} key={isoDay(day)} onDoubleClick={() => openAdd(day)}>
             <div className={`date-number ${today ? "today" : ""}`}>{day.getDate()}</div>
-            <div className="day-events">{dayEvents.slice(0, 3).map((event) => <button className="event-chip" key={event.id} style={{ "--category": COLORS[event.categories[0]] }} onClick={() => setModal(event)}><span>{displayTime(event.start_at)}</span>{event.title}</button>)}{dayEvents.length > 3 && <button className="more-events" onClick={() => setModal({ day, events: dayEvents })}>+{dayEvents.length - 3} more</button>}</div>
+            <div className="day-events">{dayEvents.slice(0, 3).map((event) => <button className={`event-chip ${event.status === "cancelled" ? "cancelled" : ""} ${event.status === "pending" ? "pending" : ""}`} key={event.id} style={{ "--category": COLORS[event.categories[0]] }} onClick={() => openEvent(event)}><span>{displayTime(event.start_at)}</span>{event.status === "cancelled" ? "Cancelled · " : event.status === "pending" ? "Pending · " : ""}{event.title}</button>)}{dayEvents.length > 3 && <button className="more-events" onClick={() => setModal({ day, events: dayEvents })}>+{dayEvents.length - 3} more</button>}</div>
             {!outside && <button className="day-add" onClick={() => openAdd(day)} aria-label={`Add event on ${day.toDateString()}`}><Plus size={15}/></button>}
           </div>;
         })}</div>
@@ -113,8 +167,7 @@ function App({ onReviewRules }) {
     <footer><p>Built for the Streetwise community in NYC.</p><p>Need an event removed? No big deal—<a href="mailto:natkuma@outlook.com">email Natalie</a> or <a href="https://www.linkedin.com/in/natalie-chan-shimin/" target="_blank" rel="noreferrer">message her on LinkedIn</a>.</p></footer>
 
     {modal === "add" && <div className="modal-backdrop" onMouseDown={(e) => e.target === e.currentTarget && setModal(null)}><div className="modal add-modal"><button className="modal-close" onClick={() => setModal(null)}><X /></button>{confirming ? <Confirmation form={form} onBack={() => setConfirming(false)} onSubmit={submitEvent}/> : <EventForm form={form} errors={errors} updateForm={updateForm} toggleCategory={toggleCategory} onSubmit={beginSubmit}/>}</div></div>}
-    {modal && modal !== "add" && !modal.events && <div className="modal-backdrop" onMouseDown={(e) => e.target === e.currentTarget && setModal(null)}><EventDetail event={modal} close={() => setModal(null)} /></div>}
-    {modal?.events && <div className="modal-backdrop"><div className="modal"><button className="modal-close" onClick={() => setModal(null)}><X /></button><p className="eyebrow">{modal.day.toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric" })}</p><h2>Events this day</h2><div className="event-list">{modal.events.map((event) => <button key={event.id} onClick={() => setModal(event)}>{displayTime(event.start_at)} · {event.title}</button>)}</div></div></div>}
+    {modal?.events && <div className="modal-backdrop"><div className="modal"><button className="modal-close" onClick={() => setModal(null)}><X /></button><p className="eyebrow">{modal.day.toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric" })}</p><h2>Events this day</h2><div className="event-list">{modal.events.map((event) => <button key={event.id} onClick={() => openEvent(event)}>{event.status === "cancelled" ? "Cancelled · " : event.status === "pending" ? "Pending · " : ""}{displayTime(event.start_at)} · {event.title}</button>)}</div></div></div>}
   </div>;
 }
 
@@ -132,13 +185,34 @@ function EventForm({ form, errors, updateForm, toggleCategory, onSubmit }) {
   </form>;
 }
 function Confirmation({ form, onBack, onSubmit }) {
-  return <div className="confirmation"><div className="warning-icon">!</div><p className="eyebrow">ONE QUICK LOOK</p><h2>Everything look right?</h2><p>Events go live right away, so give the date, time, and link a quick check. Don’t worry—if something needs to come down later, just <a href="mailto:natkuma@outlook.com">email Natalie</a> or <a href="https://www.linkedin.com/in/natalie-chan-shimin/" target="_blank" rel="noreferrer">send a LinkedIn message</a>. We’re happy you’re sharing it.</p>
+  return <div className="confirmation"><div className="warning-icon">!</div><p className="eyebrow">ONE QUICK LOOK</p><h2>Everything look right?</h2><p>Your event will appear on the calendar in a light <strong>Pending</strong> style until Natalie reviews and approves it. Give the date, time, and link a quick check before submitting. We’re happy you’re sharing it.</p>
     <div className="review-card"><b>{form.title}</b><span>{new Date(`${form.date}T12:00`).toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric", year: "numeric" })}</span><span>{form.startTime}–{form.endTime} · New York time</span><span className="review-link">{form.event_url}</span></div>
     <div className="confirmation-actions"><button className="text-button" onClick={onBack}>Go back and edit</button><button className="primary-button" onClick={onSubmit}>Yes, add it</button></div>
   </div>;
 }
-function EventDetail({ event, close }) {
-  return <article className="modal detail-modal"><button className="modal-close" onClick={close}><X/></button><div className="detail-categories">{event.categories.map((category) => <span style={{ "--category": COLORS[category] }} key={category}><i/>{category}</span>)}</div><h2>{event.title}</h2><p className="detail-time">{new Date(event.start_at).toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric" })}<br/><b>{displayTime(event.start_at)}–{displayTime(event.end_at)} ET</b></p>{event.location && <p className="detail-location"><MapPin size={18}/>{event.location}</p>}{event.description && <p className="detail-description">{event.description}</p>}<a className="primary-button detail-link" href={event.event_url} target="_blank" rel="noreferrer">View event details <ExternalLink size={17}/></a></article>;
+function EventDetailsPage({ event, loading, onBack, onReviewRules }) {
+  return <div className="app-shell event-detail-page">
+    <header className="topbar">
+      <button className="brand brand-button" type="button" onClick={onBack} aria-label="Back to calendar"><span className="brand-mark"><CalendarDays size={20} /></span><span>Streetwise <b>NYC</b></span></button>
+      <p className="tagline">Event details</p>
+      <button className="rules-link" type="button" onClick={onReviewRules}><ShieldCheck size={16} /> Community rules</button>
+      <button className="text-button" type="button" onClick={onBack}><ChevronLeft size={17}/> Back to calendar</button>
+    </header>
+    <main className="event-detail-main">
+      {loading && <p className="detail-state">Loading event…</p>}
+      {!loading && !event && <section className="detail-page-card"><p className="eyebrow">EVENT NOT AVAILABLE</p><h1>This event could not be found.</h1><button className="primary-button" onClick={onBack}>Return to calendar</button></section>}
+      {event && <article className="detail-page-card">
+        {event.status === "cancelled" && <div className="cancelled-banner" role="status">Cancelled — this event is no longer taking place.</div>}
+        {event.status === "pending" && <div className="pending-banner" role="status">Pending approval — this event has been submitted and is waiting for review.</div>}
+        <div className="detail-categories">{event.categories.map((category) => <span style={{ "--category": COLORS[category] }} key={category}><i/>{category}</span>)}</div>
+        <h1>{event.title}</h1>
+        <p className="detail-time">{new Date(event.start_at).toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric", year: "numeric" })}<br/><b>{displayTime(event.start_at)}–{displayTime(event.end_at)} ET</b></p>
+        {event.location && <p className="detail-location"><MapPin size={18}/>{event.location}</p>}
+        {event.description && <p className="detail-description">{event.description}</p>}
+        <a className="primary-button detail-link" href={event.event_url} target="_blank" rel="noreferrer">View event details <ExternalLink size={17}/></a>
+      </article>}
+    </main>
+  </div>;
 }
 
 export default App;

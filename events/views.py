@@ -3,6 +3,7 @@ from datetime import datetime
 from urllib.parse import urlparse
 
 from django.http import JsonResponse
+from django.shortcuts import get_object_or_404
 from django.utils import timezone
 from django.views.decorators.http import require_http_methods
 from django.views.decorators.csrf import csrf_exempt
@@ -25,6 +26,7 @@ def serialize_event(event):
         "categories": event.categories,
         "location": event.location,
         "description": event.description,
+        "status": event.status,
     }
 
 
@@ -39,7 +41,13 @@ def parse_datetime(value):
 @require_http_methods(["GET", "POST"])
 def event_list(request):
     if request.method == "GET":
-        events = Event.objects.all()
+        events = Event.objects.filter(
+            status__in=[
+                Event.Status.PUBLISHED,
+                Event.Status.PENDING,
+                Event.Status.CANCELLED,
+            ]
+        )
         start = request.GET.get("start")
         end = request.GET.get("end")
         if start:
@@ -87,4 +95,19 @@ def event_list(request):
 @require_http_methods(["GET"])
 def category_list(request):
     return JsonResponse({"categories": CATEGORIES})
+
+
+@require_http_methods(["GET"])
+def event_detail(request, event_id):
+    event = get_object_or_404(
+        Event.objects.filter(
+            status__in=[
+                Event.Status.PUBLISHED,
+                Event.Status.PENDING,
+                Event.Status.CANCELLED,
+            ]
+        ),
+        pk=event_id,
+    )
+    return JsonResponse({"event": serialize_event(event)})
 
