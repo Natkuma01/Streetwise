@@ -4,10 +4,15 @@ from .models import Event, Video
 
 @admin.register(Event)
 class EventAdmin(admin.ModelAdmin):
-    list_display = ("title", "status", "start_at", "end_at", "location")
+    list_display = ("reference", "title", "status", "start_at", "time_zone", "submitter_email")
     list_editable = ("status",)
     list_filter = ("status", "start_at")
-    search_fields = ("title", "description", "location")
+    search_fields = ("title", "description", "location", "submitter_name", "submitter_email")
+    readonly_fields = ("reference", "submission_fingerprint", "created_at")
+
+    @admin.display(description="Reference")
+    def reference(self, event):
+        return event.reference
 
 
 @admin.register(Video)

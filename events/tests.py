@@ -1,6 +1,7 @@
 import json
 from datetime import datetime, timedelta
 
+from django.core.cache import cache
 from django.test import TestCase
 from django.utils import timezone
 
@@ -8,6 +9,9 @@ from .models import Event, Video
 
 
 class EventApiTests(TestCase):
+    def setUp(self):
+        cache.clear()
+
     def make_event(self, *, title="Community event", status=Event.Status.PUBLISHED, start_at=None):
         start_at = start_at or timezone.make_aware(datetime(2026, 11, 18, 18, 0))
         return Event.objects.create(
@@ -19,48 +23,144 @@ class EventApiTests(TestCase):
             status=status,
         )
 
-    def test_create_and_list_event(self):
+    def valid_payload(self, **overrides):
         payload = {
             "title": "A useful NYC talk",
-            "start_at": "2026-11-18T18:00:00",
-            "end_at": "2026-11-18T19:30:00",
+            "date": (timezone.localdate() + timedelta(days=7)).isoformat(),
+            "start_time": "18:00",
+            "end_time": "19:30",
+            "time_zone": "America/New_York",
             "event_url": "https://example.com/event",
             "categories": ["Tech", "Education"],
             "location": "Online",
             "description": "An open community lecture.",
+            "submitter_name": "Taylor",
+            "submitter_email": "taylor@example.com",
         }
-        response = self.client.post("/api/events/", json.dumps(payload), content_type="application/json")
+        payload.update(overrides)
+        return payload
+
+    def post_event(self, payload=None):
+        return self.client.post(
+            "/api/events/",
+            json.dumps(self.valid_payload() if payload is None else payload),
+            content_type="application/json",
+        )
+
+    def test_valid_submission_is_saved_once_as_pending_with_reference(self):
+        payload = self.valid_payload()
+        response = self.post_event(payload)
+
         self.assertEqual(response.status_code, 201)
         self.assertEqual(Event.objects.count(), 1)
-        self.assertEqual(response.json()["event"]["status"], "pending")
+        event = Event.objects.get()
+        self.assertEqual(event.status, Event.Status.PENDING)
+        self.assertEqual(event.time_zone, "America/New_York")
+        self.assertEqual(event.submitter_name, "Taylor")
+        self.assertEqual(event.submitter_email, "taylor@example.com")
+        self.assertEqual(response.json()["event"]["reference"], f"SSP-EVT-{event.id:06d}")
 
         response = self.client.get("/api/events/")
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json()["events"][0]["title"], payload["title"])
 
-    def test_rejects_end_before_start(self):
+    def test_optional_fields_can_be_blank(self):
         payload = {
-            "title": "Invalid event",
-            "start_at": "2026-11-18T20:00:00",
-            "end_at": "2026-11-18T18:00:00",
-            "event_url": "https://example.com/event",
-            "categories": ["Others"],
+            **self.valid_payload(),
+            "end_time": "",
+            "event_url": "",
+            "location": "",
+            "description": "",
+            "submitter_name": "",
+            "submitter_email": "",
         }
-        response = self.client.post("/api/events/", json.dumps(payload), content_type="application/json")
+        response = self.post_event(payload)
+
+        self.assertEqual(response.status_code, 201)
+        event = Event.objects.get()
+        self.assertIsNone(event.end_at)
+        self.assertEqual(event.event_url, "")
+        self.assertEqual(event.submitter_name, "")
+        self.assertEqual(event.submitter_email, "")
+        self.assertIsNone(response.json()["event"]["end_at"])
+
+    def test_required_fields_return_field_specific_errors(self):
+        response = self.post_event({
+            "title": "",
+            "date": "",
+            "start_time": "",
+            "time_zone": "",
+            "categories": [],
+        })
+
         self.assertEqual(response.status_code, 400)
-        self.assertIn("end_at", response.json()["errors"])
+        self.assertCountEqual(
+            response.json()["errors"].keys(),
+            ["title", "date", "start_time", "time_zone", "categories"],
+        )
+        self.assertEqual(Event.objects.count(), 0)
+
+    def test_rejects_end_before_start(self):
+        response = self.post_event(self.valid_payload(start_time="20:00", end_time="18:00"))
+
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("end_time", response.json()["errors"])
 
     def test_rejects_unknown_category(self):
-        payload = {
-            "title": "Invalid event",
-            "start_at": "2026-11-18T18:00:00",
-            "end_at": "2026-11-18T19:00:00",
-            "event_url": "https://example.com/event",
-            "categories": ["Not a category"],
-        }
-        response = self.client.post("/api/events/", json.dumps(payload), content_type="application/json")
+        response = self.post_event(self.valid_payload(categories=["Not a category"]))
+
         self.assertEqual(response.status_code, 400)
         self.assertIn("categories", response.json()["errors"])
+
+    def test_rejects_invalid_timezone_url_and_email(self):
+        response = self.post_event(self.valid_payload(
+            time_zone="Mars/Olympus",
+            event_url="javascript:alert(1)",
+            location="www.example.com/meeting",
+            submitter_email="not-an-email",
+        ))
+
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("time_zone", response.json()["errors"])
+        self.assertIn("event_url", response.json()["errors"])
+        self.assertIn("location", response.json()["errors"])
+        self.assertIn("submitter_email", response.json()["errors"])
+
+    def test_sanitizes_text_and_enforces_length_limits(self):
+        response = self.post_event(self.valid_payload(
+            title="<b>Community</b>   Workshop",
+            description="<script>alert('x')</script> Useful details.",
+        ))
+
+        self.assertEqual(response.status_code, 201)
+        event = Event.objects.get()
+        self.assertEqual(event.title, "Community Workshop")
+        self.assertNotIn("<script>", event.description)
+
+        cache.clear()
+        response = self.post_event(self.valid_payload(title="x" * 181))
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("title", response.json()["errors"])
+
+    def test_duplicate_submission_is_rejected_and_saved_once(self):
+        first = self.post_event()
+        second = self.post_event()
+
+        self.assertEqual(first.status_code, 201)
+        self.assertEqual(second.status_code, 409)
+        self.assertIn(first.json()["event"]["reference"], second.json()["errors"]["form"])
+        self.assertEqual(Event.objects.count(), 1)
+
+    def test_basic_rate_limit_rejects_sixth_submission(self):
+        for index in range(5):
+            response = self.post_event(self.valid_payload(title=f"Event {index}"))
+            self.assertEqual(response.status_code, 201)
+
+        response = self.post_event(self.valid_payload(title="Event 6"))
+
+        self.assertEqual(response.status_code, 429)
+        self.assertIn("10 minutes", response.json()["errors"]["form"])
+        self.assertEqual(Event.objects.count(), 5)
 
     def test_public_list_includes_pending_but_excludes_rejected_events(self):
         published = self.make_event(title="Published")

@@ -1,11 +1,19 @@
+import hashlib
 import json
 import re
-from datetime import datetime
+from datetime import date, datetime, time
 from urllib.parse import parse_qs, urlparse
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
+from django.core.cache import cache
+from django.core.exceptions import ValidationError
+from django.core.validators import URLValidator, validate_email
+from django.db import IntegrityError, transaction
+from django.db.models import Q
 from django.http import JsonResponse
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
+from django.utils.html import strip_tags
 from django.views.decorators.http import require_http_methods
 from django.views.decorators.csrf import csrf_exempt
 
@@ -24,14 +32,27 @@ YOUTUBE_HOSTS = {
 }
 YOUTUBE_SHORT_HOSTS = {"youtu.be", "www.youtu.be"}
 YOUTUBE_ID_PATTERN = re.compile(r"^[A-Za-z0-9_-]{11}$")
+HTTP_URL_VALIDATOR = URLValidator(schemes=["http", "https"])
+EVENT_RATE_LIMIT = 5
+EVENT_RATE_WINDOW_SECONDS = 10 * 60
+EVENT_TEXT_LIMITS = {
+    "title": 180,
+    "location": 240,
+    "description": 2000,
+    "submitter_name": 120,
+    "submitter_email": 254,
+    "event_url": 1000,
+}
 
 
 def serialize_event(event):
     return {
         "id": event.id,
+        "reference": event.reference,
         "title": event.title,
         "start_at": event.start_at.isoformat(),
-        "end_at": event.end_at.isoformat(),
+        "end_at": event.end_at.isoformat() if event.end_at else None,
+        "time_zone": event.time_zone,
         "event_url": event.event_url,
         "categories": event.categories,
         "location": event.location,
@@ -45,6 +66,44 @@ def parse_datetime(value):
     if timezone.is_naive(parsed):
         parsed = timezone.make_aware(parsed, timezone.get_current_timezone())
     return parsed
+
+
+def sanitize_text(value):
+    if not isinstance(value, str):
+        raise TypeError
+    return " ".join(strip_tags(value).split())
+
+
+def validate_length(errors, field, value, label):
+    if len(value) > EVENT_TEXT_LIMITS[field]:
+        errors[field] = f"{label} must be {EVENT_TEXT_LIMITS[field]} characters or fewer."
+
+
+def build_event_datetime(event_date, event_time, time_zone_name):
+    zone = ZoneInfo(time_zone_name)
+    return datetime.combine(
+        date.fromisoformat(event_date),
+        time.fromisoformat(event_time),
+        tzinfo=zone,
+    )
+
+
+def event_submission_fingerprint(title, start_at):
+    normalized = f"{title.casefold()}|{start_at.astimezone(timezone.utc).isoformat()}"
+    return hashlib.sha256(normalized.encode("utf-8")).hexdigest()
+
+
+def event_submission_is_rate_limited(request):
+    remote_address = request.META.get("REMOTE_ADDR", "unknown")
+    key = f"event-submit:{hashlib.sha256(remote_address.encode('utf-8')).hexdigest()}"
+    if cache.add(key, 1, timeout=EVENT_RATE_WINDOW_SECONDS):
+        return False
+    try:
+        count = cache.incr(key)
+    except ValueError:
+        cache.set(key, 1, timeout=EVENT_RATE_WINDOW_SECONDS)
+        return False
+    return count > EVENT_RATE_LIMIT
 
 
 def extract_youtube_id(value):
@@ -96,45 +155,130 @@ def event_list(request):
         start = request.GET.get("start")
         end = request.GET.get("end")
         if start:
-            events = events.filter(end_at__gte=parse_datetime(start))
+            window_start = parse_datetime(start)
+            events = events.filter(
+                Q(end_at__gte=window_start)
+                | Q(end_at__isnull=True, start_at__gte=window_start)
+            )
         if end:
             events = events.filter(start_at__lt=parse_datetime(end))
         return JsonResponse({"events": [serialize_event(event) for event in events]})
 
+    if event_submission_is_rate_limited(request):
+        return JsonResponse(
+            {"errors": {"form": "Too many submissions were sent from this connection. Please try again in 10 minutes."}},
+            status=429,
+        )
+
     try:
         data = json.loads(request.body)
-        title = data.get("title", "").strip()
-        event_url = data.get("event_url", "").strip()
+        title = sanitize_text(data.get("title", ""))
+        event_url = sanitize_text(data.get("event_url", ""))
+        location = sanitize_text(data.get("location", ""))
+        description = sanitize_text(data.get("description", ""))
+        submitter_name = sanitize_text(data.get("submitter_name", ""))
+        submitter_email = sanitize_text(data.get("submitter_email", "")).lower()
+        time_zone_name = sanitize_text(data.get("time_zone", ""))
         categories = data.get("categories", [])
-        start_at = parse_datetime(data["start_at"])
-        end_at = parse_datetime(data["end_at"])
 
         errors = {}
         if not title:
             errors["title"] = "Please add an event title."
-        if not event_url or urlparse(event_url).scheme not in {"http", "https"}:
-            errors["event_url"] = "Please add a valid event link."
+        validate_length(errors, "title", title, "Event title")
+        validate_length(errors, "event_url", event_url, "Organizer/source link")
+        validate_length(errors, "location", location, "Location or meeting link")
+        validate_length(errors, "description", description, "Description")
+        validate_length(errors, "submitter_name", submitter_name, "Submitter name")
+        validate_length(errors, "submitter_email", submitter_email, "Submitter email")
+
+        if event_url:
+            try:
+                HTTP_URL_VALIDATOR(event_url)
+            except ValidationError:
+                errors["event_url"] = "Add a valid http or https organizer/source link."
+        if location and ("://" in location or location.lower().startswith("www.")):
+            try:
+                HTTP_URL_VALIDATOR(location)
+            except ValidationError:
+                errors["location"] = "Add a complete http or https meeting link, or enter a physical location."
+        if submitter_email:
+            try:
+                validate_email(submitter_email)
+            except ValidationError:
+                errors["submitter_email"] = "Add a valid email address or leave this field blank."
+
         if not categories or not isinstance(categories, list):
             errors["categories"] = "Choose at least one category."
         elif any(category not in CATEGORIES for category in categories):
             errors["categories"] = "One or more categories are not recognized."
-        if end_at <= start_at:
-            errors["end_at"] = "End time must be after start time."
+        categories = list(dict.fromkeys(categories)) if isinstance(categories, list) else []
+
+        if not data.get("date"):
+            errors["date"] = "Choose an event date."
+        if not data.get("start_time"):
+            errors["start_time"] = "Add a start time."
+        if not time_zone_name:
+            errors["time_zone"] = "Choose a time zone."
+
+        start_at = None
+        end_at = None
+        if data.get("date") and data.get("start_time") and time_zone_name:
+            try:
+                start_at = build_event_datetime(data["date"], data["start_time"], time_zone_name)
+            except (TypeError, ValueError):
+                errors["date"] = "Choose a valid event date and start time."
+            except ZoneInfoNotFoundError:
+                errors["time_zone"] = "Choose a recognized time zone."
+
+        if start_at and start_at <= timezone.now():
+            errors["date"] = "Choose a future event date and time."
+
+        if data.get("end_time") and start_at:
+            try:
+                end_at = build_event_datetime(data["date"], data["end_time"], time_zone_name)
+                if end_at <= start_at:
+                    errors["end_time"] = "End time must be after start time."
+            except (TypeError, ValueError):
+                errors["end_time"] = "Add a valid end time or leave it blank."
+            except ZoneInfoNotFoundError:
+                errors["time_zone"] = "Choose a recognized time zone."
+
         if errors:
             return JsonResponse({"errors": errors}, status=400)
 
-        event = Event.objects.create(
-            title=title,
-            start_at=start_at,
-            end_at=end_at,
-            event_url=event_url,
-            categories=categories,
-            location=data.get("location", "").strip(),
-            description=data.get("description", "").strip(),
-        )
+        fingerprint = event_submission_fingerprint(title, start_at)
+        duplicate = Event.objects.filter(submission_fingerprint=fingerprint).first()
+        if duplicate:
+            return JsonResponse(
+                {"errors": {"form": f"This event appears to have already been submitted. Reference: {duplicate.reference}"}},
+                status=409,
+            )
+
+        try:
+            with transaction.atomic():
+                event = Event.objects.create(
+                    title=title,
+                    start_at=start_at,
+                    end_at=end_at,
+                    time_zone=time_zone_name,
+                    event_url=event_url,
+                    categories=categories,
+                    location=location,
+                    description=description,
+                    submitter_name=submitter_name,
+                    submitter_email=submitter_email,
+                    submission_fingerprint=fingerprint,
+                    status=Event.Status.PENDING,
+                )
+        except IntegrityError:
+            duplicate = Event.objects.get(submission_fingerprint=fingerprint)
+            return JsonResponse(
+                {"errors": {"form": f"This event appears to have already been submitted. Reference: {duplicate.reference}"}},
+                status=409,
+            )
         return JsonResponse({"event": serialize_event(event)}, status=201)
-    except (KeyError, ValueError, TypeError, json.JSONDecodeError):
-        return JsonResponse({"errors": {"form": "Please check the required date and time fields."}}, status=400)
+    except (KeyError, TypeError, json.JSONDecodeError):
+        return JsonResponse({"errors": {"form": "Please check the submission fields and try again."}}, status=400)
 
 
 @require_http_methods(["GET"])
