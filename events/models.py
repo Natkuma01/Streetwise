@@ -1,4 +1,3 @@
-from django.core.validators import URLValidator
 from django.db import models
 
 
@@ -6,7 +5,7 @@ class Event(models.Model):
     title = models.CharField(max_length=180)
     start_at = models.DateTimeField()
     end_at = models.DateTimeField()
-    event_url = models.URLField(max_length=1000, validators=[URLValidator()])
+    event_url = models.URLField(max_length=1000)
     categories = models.JSONField(default=list)
     location = models.CharField(max_length=240, blank=True)
     description = models.TextField(blank=True)

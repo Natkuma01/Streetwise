@@ -3,9 +3,9 @@ import { CalendarDays, ChevronLeft, ChevronRight, ExternalLink, MapPin, Plus, Sh
 
 const CATEGORIES = ["Tech", "Finance", "Marketing", "Business", "Entrepreneurship", "Education", "Arts & Culture", "Community", "Career", "Others"];
 const COLORS = {
-  Tech: "#2878ff", Finance: "#0b9b75", Marketing: "#ed6b2f", Business: "#7557d5",
-  Entrepreneurship: "#d04773", Education: "#c49319", "Arts & Culture": "#b34dc4",
-  Community: "#1594a6", Career: "#54702f", Others: "#687386",
+  Tech: "#276c57", Finance: "#3d8067", Marketing: "#b58c2d", Business: "#507564",
+  Entrepreneurship: "#96783a", Education: "#6c8d5b", "Arts & Culture": "#7d6f48",
+  Community: "#2f7a6b", Career: "#557c3f", Others: "#718078",
 };
 const WEEKDAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 const emptyForm = { title: "", date: "", startTime: "", endTime: "", event_url: "", categories: [], location: "", description: "" };
