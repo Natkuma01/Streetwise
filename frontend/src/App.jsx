@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useState } from "react";
-import { CalendarDays, ChevronLeft, ChevronRight, ExternalLink, MapPin, Plus, ShieldCheck, SlidersHorizontal, X } from "lucide-react";
+import { CalendarDays, ChevronLeft, ChevronRight, CirclePlay, ExternalLink, MapPin, Plus, ShieldCheck, SlidersHorizontal, X } from "lucide-react";
 import { eventIdFromHash, filterEventsByCategories, monthWindow } from "./calendar";
+import { isValidYoutubeUrl } from "./videos";
+import "./videos.css";
 
 const CATEGORIES = ["Tech", "Finance", "Marketing", "Business", "Entrepreneurship", "Education", "Arts & Culture", "Community", "Career", "Others"];
 const COLORS = {
@@ -10,6 +12,7 @@ const COLORS = {
 };
 const WEEKDAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 const emptyForm = { title: "", date: "", startTime: "", endTime: "", event_url: "", categories: [], location: "", description: "" };
+const emptyVideoForm = { youtube_url: "", categories: [], submitter_name: "", description: "" };
 
 const isoDay = (date) => `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
 const sameDay = (iso, date) => iso.slice(0, 10) === isoDay(date);
@@ -28,6 +31,7 @@ function App({ onReviewRules }) {
   const [detailId, setDetailId] = useState(() => eventIdFromHash(window.location.hash));
   const [detailEvent, setDetailEvent] = useState(null);
   const [detailLoading, setDetailLoading] = useState(false);
+  const [page, setPage] = useState(() => window.location.hash === "#videos" ? "videos" : "calendar");
 
   const loadEvents = async () => {
     setLoading(true);
@@ -39,15 +43,18 @@ function App({ onReviewRules }) {
     } finally { setLoading(false); }
   };
 
-  useEffect(() => { loadEvents(); }, [month]);
+  useEffect(() => { if (page === "calendar") loadEvents(); }, [month, page]);
 
   useEffect(() => {
-    const syncDetail = () => setDetailId(eventIdFromHash(window.location.hash));
-    window.addEventListener("hashchange", syncDetail);
-    window.addEventListener("popstate", syncDetail);
+    const syncLocation = () => {
+      setDetailId(eventIdFromHash(window.location.hash));
+      setPage(window.location.hash === "#videos" ? "videos" : "calendar");
+    };
+    window.addEventListener("hashchange", syncLocation);
+    window.addEventListener("popstate", syncLocation);
     return () => {
-      window.removeEventListener("hashchange", syncDetail);
-      window.removeEventListener("popstate", syncDetail);
+      window.removeEventListener("hashchange", syncLocation);
+      window.removeEventListener("popstate", syncLocation);
     };
   }, []);
 
@@ -99,6 +106,17 @@ function App({ onReviewRules }) {
     setDetailId(null);
     setDetailEvent(null);
   };
+  const openVideos = () => {
+    window.history.pushState(null, "", "#videos");
+    setDetailId(null);
+    setPage("videos");
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  };
+  const openCalendar = () => {
+    window.history.pushState(null, "", window.location.pathname);
+    setPage("calendar");
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  };
   const validate = () => {
     const next = {};
     if (!form.title.trim()) next.title = "Add a title.";
@@ -120,13 +138,17 @@ function App({ onReviewRules }) {
   };
 
   if (detailId) {
-    return <EventDetailsPage event={detailEvent} loading={detailLoading} onBack={closeEvent} onReviewRules={onReviewRules} />;
+    return <EventDetailsPage event={detailEvent} loading={detailLoading} onBack={closeEvent} onOpenVideos={openVideos} onReviewRules={onReviewRules} />;
+  }
+
+  if (page === "videos") {
+    return <VideosPage onOpenCalendar={openCalendar} onReviewRules={onReviewRules} />;
   }
 
   return <div className="app-shell">
     <header className="topbar">
       <a className="brand" href="#" aria-label="Streetwise NYC home"><span className="brand-mark"><CalendarDays size={20} /></span><span>Streetwise <b>NYC</b></span></a>
-      <p className="tagline">A community calendar for curious New Yorkers.</p>
+      <nav className="main-nav" aria-label="Main navigation"><button className="active" type="button" aria-current="page">Calendar</button><button type="button" onClick={openVideos}>Videos</button></nav>
       <button className="rules-link" type="button" onClick={onReviewRules}>
         <ShieldCheck size={16} /> Community rules
       </button>
@@ -190,11 +212,11 @@ function Confirmation({ form, onBack, onSubmit }) {
     <div className="confirmation-actions"><button className="text-button" onClick={onBack}>Go back and edit</button><button className="primary-button" onClick={onSubmit}>Yes, add it</button></div>
   </div>;
 }
-function EventDetailsPage({ event, loading, onBack, onReviewRules }) {
+function EventDetailsPage({ event, loading, onBack, onOpenVideos, onReviewRules }) {
   return <div className="app-shell event-detail-page">
     <header className="topbar">
       <button className="brand brand-button" type="button" onClick={onBack} aria-label="Back to calendar"><span className="brand-mark"><CalendarDays size={20} /></span><span>Streetwise <b>NYC</b></span></button>
-      <p className="tagline">Event details</p>
+      <nav className="main-nav" aria-label="Main navigation"><button className="active" type="button" aria-current="page" onClick={onBack}>Calendar</button><button type="button" onClick={onOpenVideos}>Videos</button></nav>
       <button className="rules-link" type="button" onClick={onReviewRules}><ShieldCheck size={16} /> Community rules</button>
       <button className="text-button" type="button" onClick={onBack}><ChevronLeft size={17}/> Back to calendar</button>
     </header>
@@ -212,6 +234,98 @@ function EventDetailsPage({ event, loading, onBack, onReviewRules }) {
         <a className="primary-button detail-link" href={event.event_url} target="_blank" rel="noreferrer">View event details <ExternalLink size={17}/></a>
       </article>}
     </main>
+  </div>;
+}
+
+function VideosPage({ onOpenCalendar, onReviewRules }) {
+  const [videos, setVideos] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState("");
+  const [form, setForm] = useState(emptyVideoForm);
+  const [errors, setErrors] = useState({});
+  const [submitting, setSubmitting] = useState(false);
+  const [success, setSuccess] = useState(null);
+
+  useEffect(() => {
+    let active = true;
+    fetch("/api/videos/")
+      .then((response) => response.ok ? response.json() : Promise.reject(new Error("Unable to load videos")))
+      .then((data) => { if (active) setVideos(data.videos || []); })
+      .catch(() => { if (active) setLoadError("Videos could not be loaded right now."); })
+      .finally(() => { if (active) setLoading(false); });
+    return () => { active = false; };
+  }, []);
+
+  const update = (field, value) => setForm((current) => ({ ...current, [field]: value }));
+  const toggleCategory = (category) => update(
+    "categories",
+    form.categories.includes(category)
+      ? form.categories.filter((item) => item !== category)
+      : [...form.categories, category],
+  );
+  const submit = async (event) => {
+    event.preventDefault();
+    const nextErrors = {};
+    if (!isValidYoutubeUrl(form.youtube_url)) nextErrors.youtube_url = "Add a valid YouTube video link.";
+    if (!form.categories.length) nextErrors.categories = "Choose at least one category.";
+    if (Object.keys(nextErrors).length) { setErrors(nextErrors); return; }
+
+    setSubmitting(true);
+    setErrors({});
+    try {
+      const response = await fetch("/api/videos/", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "X-CSRFToken": document.cookie.match(/csrftoken=([^;]+)/)?.[1] || "" },
+        body: JSON.stringify(form),
+      });
+      const data = await response.json();
+      if (!response.ok) { setErrors(data.errors || { form: "Something went wrong. Please try again." }); return; }
+      setSuccess(data.video.reference);
+      setForm(emptyVideoForm);
+    } catch {
+      setErrors({ form: "The video could not be submitted. Please try again." });
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  return <div className="app-shell videos-page">
+    <header className="topbar">
+      <button className="brand brand-button" type="button" onClick={onOpenCalendar} aria-label="Streetwise NYC home"><span className="brand-mark"><CalendarDays size={20} /></span><span>Streetwise <b>NYC</b></span></button>
+      <nav className="main-nav" aria-label="Main navigation"><button type="button" onClick={onOpenCalendar}>Calendar</button><button className="active" type="button" aria-current="page">Videos</button></nav>
+      <button className="rules-link" type="button" onClick={onReviewRules}><ShieldCheck size={16} /> Community rules</button>
+    </header>
+
+    <main className="videos-main">
+      <section className="videos-hero">
+        <div><p className="eyebrow">WATCH, LEARN, SHARE</p><h1>Ideas worth<br/><em>passing along.</em></h1></div>
+        <p>Share thoughtful talks, practical explainers, interviews, and stories that help curious New Yorkers learn or connect. Skip promotions, misleading content, and anything that breaks our community rules.</p>
+      </section>
+
+      <section className="video-submit-card">
+        <div className="video-submit-copy"><CirclePlay size={30}/><p className="eyebrow">COMMUNITY SUBMISSIONS</p><h2>Know a useful video?</h2><p>Send us the YouTube link. Natalie reviews every submission before it appears here.</p></div>
+        {success ? <div className="video-success" role="status"><span>✓</span><h2>Thanks for sharing.</h2><p>Your video is waiting for review.</p><b>Reference: {success}</b><button className="text-button" type="button" onClick={() => setSuccess(null)}>Share another video</button></div> : <form className="video-form" onSubmit={submit}>
+          {errors.form && <div className="form-error">{errors.form}</div>}
+          <label>YouTube link <b>*</b><input type="url" value={form.youtube_url} onChange={(event) => update("youtube_url", event.target.value)} placeholder="https://www.youtube.com/watch?v=…"/><FieldError>{errors.youtube_url}</FieldError></label>
+          <fieldset><legend>Categories <b>*</b> <span>Choose all that fit</span></legend><div className="category-picker">{CATEGORIES.map((category) => <button type="button" key={category} aria-pressed={form.categories.includes(category)} className={form.categories.includes(category) ? "selected" : ""} style={{ "--category": COLORS[category] }} onClick={() => toggleCategory(category)}><i/>{category}</button>)}</div><FieldError>{errors.categories}</FieldError></fieldset>
+          <label>Your name <span>Optional</span><input value={form.submitter_name} onChange={(event) => update("submitter_name", event.target.value)} placeholder="How should we credit you?"/></label>
+          <label>Why it’s worth watching <span>Optional</span><textarea value={form.description} onChange={(event) => update("description", event.target.value)} rows="4" placeholder="A short note for the community"/></label>
+          <button className="primary-button submit-button" type="submit" disabled={submitting}>{submitting ? "Submitting…" : "Submit for review"} <ChevronRight size={18}/></button>
+        </form>}
+      </section>
+
+      <section className="video-library" aria-labelledby="video-library-title">
+        <div className="section-heading"><p className="eyebrow">APPROVED BY STREETWISE</p><h2 id="video-library-title">Community video shelf</h2></div>
+        {loading && <p className="detail-state">Loading videos…</p>}
+        {!loading && loadError && <p className="form-error">{loadError}</p>}
+        {!loading && !loadError && videos.length === 0 && <div className="empty-videos"><CirclePlay size={34}/><h3>The shelf is ready.</h3><p>Approved community videos will appear here.</p></div>}
+        <div className="video-grid">{videos.map((video) => <article className="video-card" key={video.id}>
+          <div className="video-frame"><iframe src={`https://www.youtube-nocookie.com/embed/${video.youtube_id}`} title={`Community video ${video.reference}`} loading="lazy" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share" allowFullScreen /></div>
+          <div className="video-card-body"><div className="detail-categories">{video.categories.map((category) => <span style={{ "--category": COLORS[category] }} key={category}><i/>{category}</span>)}</div>{video.description && <p>{video.description}</p>}{video.submitter_name && <small>Shared by {video.submitter_name}</small>}<a href={video.youtube_url} target="_blank" rel="noreferrer">Watch on YouTube <ExternalLink size={14}/></a></div>
+        </article>)}</div>
+      </section>
+    </main>
+    <footer><p>Built for the Streetwise community in NYC.</p><p>Every public video is reviewed before publication.</p></footer>
   </div>;
 }
 

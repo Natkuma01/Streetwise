@@ -4,7 +4,7 @@ from datetime import datetime, timedelta
 from django.test import TestCase
 from django.utils import timezone
 
-from .models import Event
+from .models import Event, Video
 
 
 class EventApiTests(TestCase):
@@ -103,3 +103,83 @@ class EventApiTests(TestCase):
 
         response = self.client.get(f"/api/events/{rejected.id}/")
         self.assertEqual(response.status_code, 404)
+
+
+class VideoApiTests(TestCase):
+    def valid_payload(self, **overrides):
+        payload = {
+            "youtube_url": "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
+            "categories": ["Tech", "Education"],
+            "submitter_name": "",
+            "description": "",
+        }
+        payload.update(overrides)
+        return payload
+
+    def post_video(self, payload=None):
+        return self.client.post(
+            "/api/videos/",
+            json.dumps(payload or self.valid_payload()),
+            content_type="application/json",
+        )
+
+    def test_non_youtube_url_is_rejected(self):
+        response = self.post_video(self.valid_payload(youtube_url="https://example.com/video"))
+
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("youtube_url", response.json()["errors"])
+        self.assertEqual(Video.objects.count(), 0)
+
+    def test_structurally_invalid_youtube_url_is_rejected(self):
+        response = self.post_video(self.valid_payload(youtube_url="https://youtube.com/watch?v=short"))
+
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("youtube_url", response.json()["errors"])
+
+    def test_submission_requires_at_least_one_category(self):
+        response = self.post_video(self.valid_payload(categories=[]))
+
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("categories", response.json()["errors"])
+
+    def test_multiple_categories_and_blank_optional_fields_are_accepted(self):
+        response = self.post_video()
+
+        self.assertEqual(response.status_code, 201)
+        video = Video.objects.get()
+        self.assertEqual(video.categories, ["Tech", "Education"])
+        self.assertEqual(video.submitter_name, "")
+        self.assertEqual(video.description, "")
+        self.assertEqual(video.status, Video.Status.PENDING)
+        self.assertEqual(response.json()["video"]["reference"], f"SSP-VID-{video.id:06d}")
+
+    def test_pending_and_rejected_videos_are_not_public(self):
+        Video.objects.create(
+            youtube_url="https://youtu.be/dQw4w9WgXcQ",
+            youtube_id="dQw4w9WgXcQ",
+            categories=["Community"],
+        )
+        Video.objects.create(
+            youtube_url="https://youtu.be/9bZkp7q19f0",
+            youtube_id="9bZkp7q19f0",
+            categories=["Others"],
+            status=Video.Status.REJECTED,
+        )
+
+        response = self.client.get("/api/videos/")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["videos"], [])
+
+    def test_approved_video_appears_publicly_without_authentication(self):
+        video = Video.objects.create(
+            youtube_url="https://youtu.be/dQw4w9WgXcQ",
+            youtube_id="dQw4w9WgXcQ",
+            categories=["Community", "Arts & Culture"],
+            status=Video.Status.PUBLISHED,
+        )
+
+        response = self.client.get("/api/videos/")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual([item["id"] for item in response.json()["videos"]], [video.id])

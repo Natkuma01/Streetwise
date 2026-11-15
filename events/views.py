@@ -1,6 +1,7 @@
 import json
+import re
 from datetime import datetime
-from urllib.parse import urlparse
+from urllib.parse import parse_qs, urlparse
 
 from django.http import JsonResponse
 from django.shortcuts import get_object_or_404
@@ -8,12 +9,21 @@ from django.utils import timezone
 from django.views.decorators.http import require_http_methods
 from django.views.decorators.csrf import csrf_exempt
 
-from .models import Event
+from .models import Event, Video
 
 CATEGORIES = [
     "Tech", "Finance", "Marketing", "Business", "Entrepreneurship",
     "Education", "Arts & Culture", "Community", "Career", "Others",
 ]
+
+YOUTUBE_HOSTS = {
+    "youtube.com",
+    "www.youtube.com",
+    "m.youtube.com",
+    "music.youtube.com",
+}
+YOUTUBE_SHORT_HOSTS = {"youtu.be", "www.youtu.be"}
+YOUTUBE_ID_PATTERN = re.compile(r"^[A-Za-z0-9_-]{11}$")
 
 
 def serialize_event(event):
@@ -35,6 +45,41 @@ def parse_datetime(value):
     if timezone.is_naive(parsed):
         parsed = timezone.make_aware(parsed, timezone.get_current_timezone())
     return parsed
+
+
+def extract_youtube_id(value):
+    try:
+        parsed = urlparse(value)
+    except (TypeError, ValueError):
+        return None
+    if parsed.scheme not in {"http", "https"} or not parsed.hostname:
+        return None
+
+    host = parsed.hostname.lower()
+    candidate = None
+    if host in YOUTUBE_SHORT_HOSTS:
+        candidate = parsed.path.strip("/").split("/")[0]
+    elif host in YOUTUBE_HOSTS:
+        path_parts = [part for part in parsed.path.split("/") if part]
+        if parsed.path.rstrip("/") == "/watch":
+            candidate = parse_qs(parsed.query).get("v", [None])[0]
+        elif len(path_parts) >= 2 and path_parts[0] in {"embed", "shorts", "live"}:
+            candidate = path_parts[1]
+
+    return candidate if candidate and YOUTUBE_ID_PATTERN.fullmatch(candidate) else None
+
+
+def serialize_video(video):
+    return {
+        "id": video.id,
+        "reference": video.reference,
+        "youtube_url": video.youtube_url,
+        "youtube_id": video.youtube_id,
+        "categories": video.categories,
+        "submitter_name": video.submitter_name,
+        "description": video.description,
+        "status": video.status,
+    }
 
 
 @csrf_exempt
@@ -110,4 +155,39 @@ def event_detail(request, event_id):
         pk=event_id,
     )
     return JsonResponse({"event": serialize_event(event)})
+
+
+@csrf_exempt
+@require_http_methods(["GET", "POST"])
+def video_list(request):
+    if request.method == "GET":
+        videos = Video.objects.filter(status=Video.Status.PUBLISHED)
+        return JsonResponse({"videos": [serialize_video(video) for video in videos]})
+
+    try:
+        data = json.loads(request.body)
+        youtube_url = data.get("youtube_url", "").strip()
+        youtube_id = extract_youtube_id(youtube_url)
+        categories = data.get("categories", [])
+
+        errors = {}
+        if not youtube_id:
+            errors["youtube_url"] = "Add a valid YouTube video link."
+        if not categories or not isinstance(categories, list):
+            errors["categories"] = "Choose at least one category."
+        elif any(category not in CATEGORIES for category in categories):
+            errors["categories"] = "One or more categories are not recognized."
+        if errors:
+            return JsonResponse({"errors": errors}, status=400)
+
+        video = Video.objects.create(
+            youtube_url=youtube_url,
+            youtube_id=youtube_id,
+            categories=list(dict.fromkeys(categories)),
+            submitter_name=data.get("submitter_name", "").strip(),
+            description=data.get("description", "").strip(),
+        )
+        return JsonResponse({"video": serialize_video(video)}, status=201)
+    except (AttributeError, TypeError, json.JSONDecodeError):
+        return JsonResponse({"errors": {"form": "Please check your submission and try again."}}, status=400)
 

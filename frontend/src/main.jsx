@@ -32,8 +32,8 @@ function StreetwiseExperience() {
         isReviewing={hasAcceptedRules()}
         onAgree={() => {
           acceptRules();
-          const eventHash = window.location.hash.startsWith("#event/") ? window.location.hash : "";
-          window.history.replaceState(null, "", `${window.location.pathname}${eventHash}`);
+          const returnHash = window.location.hash.startsWith("#event/") || window.location.hash === "#videos" ? window.location.hash : "";
+          window.history.replaceState(null, "", `${window.location.pathname}${returnHash}`);
           setView("calendar");
         }}
         onDisagree={() => {
