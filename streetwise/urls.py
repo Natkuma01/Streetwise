@@ -1,10 +1,15 @@
 from django.contrib import admin
-from django.urls import include, path
-from django.views.generic import TemplateView
+from django.http import JsonResponse
+from django.urls import path
+
+
+def health(_request):
+    """Cheap endpoint to confirm Django is up and reachable."""
+    return JsonResponse({"status": "ok"})
+
 
 urlpatterns = [
     path("admin/", admin.site.urls),
-    path("api/", include("events.urls")),
-    path("", TemplateView.as_view(template_name="index.html"), name="home"),
+    path("api/health/", health, name="health"),
+    # App routes go here.
 ]
-

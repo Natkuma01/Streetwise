@@ -1,184 +1,87 @@
-# Streetwise NYC
+# Streetwise
 
-Streetwise NYC is a community calendar for events in New York City. People can browse events by month, filter them by category, and share an event without creating an account.
+Skeleton for the Streetwise Sharing Platform. React on the front, Django on the back, PostgreSQL underneath. No features yet. This branch exists to prove the three pieces talk to each other.
 
-Before opening the calendar for the first time, visitors see the community rules and choose whether to accept them. Acceptance is stored only in the current browser; no account or sign-in is required. The calendar header always includes a link for reviewing the rules later.
+## What you need
 
-This guide is written for people who have not used Django or React before. Follow the steps in order.
+- Python 3.10 or newer
+- Node.js 20 or newer
+- PostgreSQL 14 or newer, running locally
 
-## What you need before you start
+## 1. Create the database
 
-Install these programs on your computer:
-
-- [Git](https://git-scm.com/downloads)
-- [Python 3](https://www.python.org/downloads/) (Python 3.10 or newer)
-- [Node.js](https://nodejs.org/) (choose the LTS version)
-
-You will use Terminal on macOS or Linux. On Windows, use PowerShell or Git Bash.
-
-Check that the programs are installed:
+PostgreSQL must be installed and running first. On macOS with Homebrew:
 
 ```bash
-git --version
-python3 --version
-node --version
-npm --version
+brew install postgresql@16
+brew services start postgresql@16
 ```
 
-On Windows, use `python` instead of `python3` if `python3` is not recognized.
-
-## 1. Download the project
-
-Open Terminal and run:
+Then make the database and its user:
 
 ```bash
-git clone https://github.com/Natkuma01/Streetwise.git
-cd Streetwise
+createdb streetwise
+psql -d streetwise -c "CREATE USER streetwise WITH PASSWORD 'change-me';"
+psql -d streetwise -c "GRANT ALL PRIVILEGES ON DATABASE streetwise TO streetwise;"
+psql -d streetwise -c "GRANT ALL ON SCHEMA public TO streetwise;"
 ```
 
-The second command moves Terminal into the project folder. Run the rest of the commands from this folder unless a step says otherwise.
+The last line matters on PostgreSQL 15 and newer. Without it, migrations fail with a permission error.
 
-## 2. Set up the Django backend
-
-Django stores the events and provides them to the calendar. First, create a private Python environment for the project.
-
-### macOS or Linux
+## 2. Set up the backend
 
 ```bash
 python3 -m venv .venv
 source .venv/bin/activate
-```
-
-### Windows PowerShell
-
-```powershell
-python -m venv .venv
-.venv\Scripts\Activate.ps1
-```
-
-When the environment is active, you should see `(.venv)` near the beginning of the Terminal line.
-
-Install the Python packages:
-
-```bash
 pip install -r requirements.txt
 ```
 
-## 3. Create the local database
+Copy the example environment file and fill it in:
 
-The app uses SQLite. SQLite is a small database stored in a file, so you do not need to install or configure a separate database program.
+```bash
+cp .env.example .env
+```
 
-Create the database tables:
+Open `.env` and set `POSTGRES_PASSWORD` to the password you used above. Generate a secret key and paste it into `DJANGO_SECRET_KEY`:
+
+```bash
+python -c "from django.core.management.utils import get_random_secret_key; print(get_random_secret_key())"
+```
+
+Run the migrations. These only create Django's own tables. There are no project models yet.
 
 ```bash
 python manage.py migrate
+python manage.py createsuperuser
+python manage.py runserver
 ```
 
-On macOS or Linux, use `python3 manage.py migrate` if `python` is not recognized.
+Check that it works: open http://127.0.0.1:8000/api/health/ and you should see `{"status": "ok"}`.
 
-This creates a local `db.sqlite3` file. It is only for your computer and is not uploaded to GitHub.
+## 3. Set up the frontend
 
-## 4. Install the React frontend
-
-The frontend is the calendar you see in the browser. Move into the frontend folder and install its packages:
+In a second Terminal window:
 
 ```bash
 cd frontend
 npm install
-cd ..
-```
-
-The last command returns you to the main `Streetwise` folder.
-
-## 5. Run the app locally
-
-The Django backend and React frontend need to run at the same time. Use two Terminal windows.
-
-### Terminal 1: run Django
-
-From the main `Streetwise` folder, activate the Python environment if it is not already active, then run:
-
-```bash
-python manage.py runserver
-```
-
-On macOS or Linux, use `python3 manage.py runserver` if needed.
-
-Keep this Terminal open. Django will run at `http://127.0.0.1:8000`.
-
-### Terminal 2: run React
-
-Open a second Terminal window. Go to the project frontend folder and run:
-
-```bash
-cd Streetwise/frontend
 npm run dev
 ```
 
-If your project is somewhere else, change `Streetwise/frontend` to its actual location.
+Open http://localhost:5173. You should see the Streetwise heading.
 
-Terminal will show a local address, usually:
+The dev server forwards anything starting with `/api` to Django on port 8000. That is set in `frontend/vite.config.js`.
 
-```text
-http://localhost:5173
+## Layout
+
 ```
-
-Open that address in your web browser. You should now see the Streetwise NYC calendar.
-
-## 6. Stop the app
-
-In each Terminal window, press `Control + C` to stop its server.
-
-To leave the Python environment, run:
-
-```bash
-deactivate
+manage.py              Django entry point
+streetwise/            Django project settings and root URLs
+  settings.py          Reads config from .env
+  urls.py              Admin plus a health check
+frontend/              React app built with Vite
+  src/
+  vite.config.js       Dev server and /api proxy
+requirements.txt       Python packages
+.env.example           Template for your .env
 ```
-
-## Everyday startup
-
-After the first setup, you do not need to reinstall everything or recreate the database. For future sessions:
-
-1. Open Terminal in the `Streetwise` folder.
-2. Activate `.venv`.
-3. Run `python manage.py runserver`.
-4. In a second Terminal, open `Streetwise/frontend` and run `npm run dev`.
-5. Visit `http://localhost:5173`.
-
-## Common problems
-
-### `python` or `python3` is not recognized
-
-Install Python, close Terminal, and open it again. Windows commonly uses `python`; macOS and Linux commonly use `python3`.
-
-### `node` or `npm` is not recognized
-
-Install the LTS version of Node.js, close Terminal, and open it again.
-
-### The page opens but no events appear
-
-Make sure the Django server is still running in the first Terminal window. The React app gets its event data from Django.
-
-### The database reports missing tables
-
-From the main project folder, run:
-
-```bash
-python manage.py migrate
-```
-
-### A port is already in use
-
-Another copy of the server may already be running. Find its Terminal window and press `Control + C`, then start the server again.
-
-## Project folders
-
-- `frontend/` contains the React calendar and visual design.
-- `events/` contains the event database model and API.
-- `streetwise/` contains the main Django settings.
-- `docs/` contains deployment instructions.
-- `manage.py` is the command used to run Django tasks.
-
-## Deployment
-
-The app is designed so Django and the compiled React frontend can be hosted together on PythonAnywhere. See [the PythonAnywhere deployment guide](docs/pythonanywhere-deployment.md) when you are ready to publish it.
