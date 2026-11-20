@@ -7,6 +7,7 @@ with a safe local default. See .env.example.
 import os
 from pathlib import Path
 
+from corsheaders.defaults import default_headers
 from dotenv import load_dotenv
 
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -130,6 +131,10 @@ CSRF_TRUSTED_ORIGINS = env_list(
     "CSRF_TRUSTED_ORIGINS", "http://localhost:5173,http://127.0.0.1:5173"
 )
 
+# The manage page sends the secret key in this header, so the browser must be
+# told that cross-origin calls may carry it.
+CORS_ALLOW_HEADERS = [*default_headers, "x-manage-key"]
+
 # --- Security (applied when DEBUG is off) -----------------------------------
 
 if not DEBUG:
@@ -150,6 +155,32 @@ REST_FRAMEWORK = {
     "DEFAULT_RENDERER_CLASSES": ["rest_framework.renderers.JSONRenderer"],
     "DEFAULT_PARSER_CLASSES": ["rest_framework.parsers.JSONParser"],
     "UNAUTHENTICATED_USER": None,
+    # How many reverse proxies sit in front of Django. Rate limits count
+    # visitors by IP address. With 0, Django uses the connection address.
+    # Behind nginx on the same server set this to 1 (see docs/deploy-aws.md),
+    # or every visitor looks like 127.0.0.1 and shares one limit.
+    # Never leave it unset in production: unset trusts a header anyone can fake.
+    "NUM_PROXIES": int(os.environ.get("NUM_PROXIES", "0")),
+}
+
+# --- Spam protection --------------------------------------------------------
+# Two layers: a hidden "honeypot" form field (see events/views.py) and a
+# per-IP rate limit. Rates look like "10/hour". Change them in .env.
+
+EVENT_SUBMIT_RATE = os.environ.get("EVENT_SUBMIT_RATE", "10/hour")
+MANAGE_RATE = os.environ.get("MANAGE_RATE", "60/hour")
+
+# How long the edit and cancel link keeps working after the event ends.
+MANAGE_LINK_GRACE_DAYS = int(os.environ.get("MANAGE_LINK_GRACE_DAYS", "3"))
+
+# The rate limit needs a cache every gunicorn worker can see. The default
+# per-process memory cache would give each worker its own counter. A file
+# cache is shared, and needs no Redis, so there is nothing extra to pay for.
+CACHES = {
+    "default": {
+        "BACKEND": "django.core.cache.backends.filebased.FileBasedCache",
+        "LOCATION": os.environ.get("DJANGO_CACHE_DIR", str(BASE_DIR / ".cache")),
+    }
 }
 
 # --- Email ------------------------------------------------------------------

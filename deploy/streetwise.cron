@@ -1,0 +1,7 @@
+# Copy to /etc/cron.d/streetwise (owner root, mode 644). The file name must
+# not have a dot in it, or cron ignores it.
+#
+# Every hour: email the admin about events waiting more than 24 hours.
+0 * * * * streetwise /opt/streetwise/venv/bin/python /opt/streetwise/app/manage.py send_pending_reminders >> /opt/streetwise/logs/reminders.log 2>&1
+# Every night at 03:15 server time: back up the database.
+15 3 * * * root /opt/streetwise/app/deploy/backup-db.sh >> /var/log/streetwise-backup.log 2>&1

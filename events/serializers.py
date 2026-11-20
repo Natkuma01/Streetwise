@@ -100,3 +100,72 @@ class EventCreatedSerializer(EventSerializer):
 
     class Meta(EventSerializer.Meta):
         fields = EventSerializer.Meta.fields + ["reference_number"]
+
+
+class EventManageSerializer(serializers.ModelSerializer):
+    """What the owner sees through their secret link.
+
+    The owner already knows their own email, name and reference number, so
+    these are included. The manage key itself is never sent back.
+    """
+
+    start_at = utc_datetime(read_only=True)
+    end_at = utc_datetime(read_only=True)
+    categories = CategorySerializer(many=True, read_only=True)
+
+    class Meta:
+        model = Event
+        fields = [
+            "id",
+            "reference_number",
+            "title",
+            "submitter_email",
+            "submitter_name",
+            "start_at",
+            "end_at",
+            "event_link",
+            "attendance_mode",
+            "description",
+            "categories",
+            "status",
+        ]
+
+
+class EventManageUpdateSerializer(EventCreateSerializer):
+    """Validates an edit. Only some fields can change.
+
+    The email, reference number and status are not editable here. Used with
+    partial=True, so the owner can send just the fields they changed.
+    """
+
+    class Meta(EventCreateSerializer.Meta):
+        fields = [f for f in EventCreateSerializer.Meta.fields if f != "submitter_email"]
+
+    def validate_start_at(self, value):
+        # An unchanged start time is fine even if it has passed. Otherwise
+        # nobody could fix the description of an event that already started.
+        if self.instance is not None and value == self.instance.start_at:
+            return value
+        return super().validate_start_at(value)
+
+    def validate(self, attrs):
+        # With a partial edit, compare against the saved values for any
+        # field that was not sent.
+        start_at = attrs.get("start_at", self.instance.start_at)
+        end_at = attrs["end_at"] if "end_at" in attrs else self.instance.end_at
+        if end_at and end_at <= start_at:
+            raise serializers.ValidationError(
+                {"end_at": "The end time must be after the start time."}
+            )
+        return attrs
+
+    def changed_fields(self):
+        """Names of the validated fields whose value differs from what is saved."""
+        changed = []
+        for name, value in self.validated_data.items():
+            if name == "categories":
+                if {c.pk for c in value} != {c.pk for c in self.instance.categories.all()}:
+                    changed.append(name)
+            elif value != getattr(self.instance, name):
+                changed.append(name)
+        return changed

@@ -1,0 +1,32 @@
+# Copy to /etc/systemd/system/streetwise.service
+# Runs the Django app with gunicorn. systemd restarts it if it crashes
+# and starts it again after a reboot.
+
+[Unit]
+Description=Streetwise (gunicorn)
+After=network.target postgresql.service
+Wants=postgresql.service
+
+[Service]
+User=streetwise
+# The group is www-data so nginx is allowed to talk to the socket.
+Group=www-data
+WorkingDirectory=/opt/streetwise/app
+# systemd creates /run/streetwise for the socket and removes it on stop.
+RuntimeDirectory=streetwise
+RuntimeDirectoryMode=0755
+# Two workers fit a 1 GB server next to PostgreSQL. Settings come from
+# /opt/streetwise/app/.env, which Django reads itself.
+ExecStart=/opt/streetwise/venv/bin/gunicorn streetwise.wsgi:application \
+    --workers 2 \
+    --bind unix:/run/streetwise/gunicorn.sock \
+    --umask 007 \
+    --access-logfile - \
+    --error-logfile -
+Restart=on-failure
+RestartSec=3
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

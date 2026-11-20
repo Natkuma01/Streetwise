@@ -83,6 +83,24 @@ In Django admin, open **Events**. Pending events are listed first. Use the **Sta
 
 You can also open one event and change its Status dropdown. Moving it to Approved sends the same email.
 
+### Spam protection
+
+Two layers protect the add event form. A hidden `fax_number` field catches bots (the frontend must include it, see `docs/api.md`). A rate limit allows 10 submits an hour from one visitor address. Both are on in local development. If you test the form a lot and hit the limit, either wait or raise `EVENT_SUBMIT_RATE` in `.env`.
+
+The limit counters are kept in files in a `.cache/` folder in the project. Delete that folder to reset them.
+
+### Reminders
+
+Events that stay Pending for more than 24 hours trigger one email to the project inbox. Run it by hand to test:
+
+```bash
+python manage.py send_pending_reminders --dry-run   # show what would be sent
+python manage.py send_pending_reminders             # send it
+python manage.py send_pending_reminders --hours 1   # try it with a shorter wait
+```
+
+On the server, cron runs it every hour (see `docs/deploy-aws.md`).
+
 ### Tests
 
 ```bash
@@ -119,11 +137,15 @@ streetwise/            Django project settings and root URLs
 events/                The events app
   models.py            Event and Category
   serializers.py       What the API accepts and returns
-  views.py             The /api/events/ and /api/categories/ endpoints
+  views.py             The events, categories and private-link (manage) endpoints
+  throttles.py         Rate limits for submit and manage calls
+  management/commands/ send_pending_reminders (24 hour reminder email)
   admin.py             Approve, reject and cancel in Django admin
   emails.py            Receipt, new-event and approval emails
   tests.py
 docs/api.md            API format for the frontend
+docs/deploy-aws.md     Step-by-step server setup on AWS Lightsail
+deploy/                Server config files (gunicorn, nginx, cron, backup)
 frontend/              React app built with Vite
   src/
   vite.config.js       Dev server and /api proxy
