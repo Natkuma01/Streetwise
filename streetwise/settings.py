@@ -1,6 +1,5 @@
 """Django settings for the Streetwise project.
 
-Skeleton only. No app models yet.
 Every environment-specific value is read from the environment,
 with a safe local default. See .env.example.
 """
@@ -46,7 +45,9 @@ INSTALLED_APPS = [
     "django.contrib.messages",
     "django.contrib.staticfiles",
     "corsheaders",
-    # Project apps go here.
+    "rest_framework",
+    # Project apps
+    "events",
 ]
 
 MIDDLEWARE = [
@@ -138,3 +139,42 @@ if not DEBUG:
     SECURE_HSTS_SECONDS = int(os.environ.get("DJANGO_HSTS_SECONDS", "3600"))
     SECURE_HSTS_INCLUDE_SUBDOMAINS = True
     SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
+
+# --- REST API ---------------------------------------------------------------
+# The API is public in v1.0: no login, no sessions. Leaving authentication
+# empty also means browsers do not need a CSRF token to submit an event.
+
+REST_FRAMEWORK = {
+    "DEFAULT_AUTHENTICATION_CLASSES": [],
+    "DEFAULT_PERMISSION_CLASSES": ["rest_framework.permissions.AllowAny"],
+    "DEFAULT_RENDERER_CLASSES": ["rest_framework.renderers.JSONRenderer"],
+    "DEFAULT_PARSER_CLASSES": ["rest_framework.parsers.JSONParser"],
+    "UNAUTHENTICATED_USER": None,
+}
+
+# --- Email ------------------------------------------------------------------
+# Site emails send from the project Gmail account over SMTP on port 587
+# (AWS blocks port 25). Gmail needs an app password, not the normal password.
+# With no EMAIL_HOST_USER set, emails print to the console instead, so local
+# development works without any credentials.
+
+EMAIL_HOST_USER = os.environ.get("EMAIL_HOST_USER", "")
+EMAIL_HOST_PASSWORD = os.environ.get("EMAIL_HOST_PASSWORD", "")
+
+if EMAIL_HOST_USER and EMAIL_HOST_PASSWORD:
+    EMAIL_BACKEND = "django.core.mail.backends.smtp.EmailBackend"
+else:
+    EMAIL_BACKEND = "django.core.mail.backends.console.EmailBackend"
+
+EMAIL_HOST = os.environ.get("EMAIL_HOST", "smtp.gmail.com")
+EMAIL_PORT = int(os.environ.get("EMAIL_PORT", "587"))
+EMAIL_USE_TLS = env_bool("EMAIL_USE_TLS", "True")
+# Short timeout so a slow mail server cannot hang a visitor's submit request.
+EMAIL_TIMEOUT = int(os.environ.get("EMAIL_TIMEOUT", "10"))
+
+DEFAULT_FROM_EMAIL = os.environ.get("DEFAULT_FROM_EMAIL", EMAIL_HOST_USER or "streetwise@localhost")
+# Where the "new event is waiting" heads-up goes.
+ADMIN_NOTIFICATION_EMAIL = os.environ.get("ADMIN_NOTIFICATION_EMAIL", EMAIL_HOST_USER)
+
+# Base URL of the React site. Used to build the edit and cancel link in emails.
+FRONTEND_BASE_URL = os.environ.get("FRONTEND_BASE_URL", "http://localhost:5173").rstrip("/")
