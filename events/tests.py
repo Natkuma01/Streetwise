@@ -79,13 +79,13 @@ class ModelTests(TestCase):
     def test_new_event_defaults(self):
         event = make_event()
         self.assertEqual(event.status, Event.Status.PENDING)
-        self.assertRegex(event.reference_number, r"^SW-[0-9A-F]{8}$")
+        self.assertRegex(event.ref_number, r"^SW-[0-9A-F]{8}$")
         self.assertIsNotNone(event.manage_key)
         self.assertIsNone(event.reminder_sent_at)
 
     def test_reference_number_and_manage_key_are_unique_per_event(self):
         a, b = make_event(), make_event()
-        self.assertNotEqual(a.reference_number, b.reference_number)
+        self.assertNotEqual(a.ref_number, b.ref_number)
         self.assertNotEqual(a.manage_key, b.manage_key)
         with self.assertRaises(IntegrityError), transaction.atomic():
             Event.objects.create(
@@ -94,7 +94,7 @@ class ModelTests(TestCase):
                 start_at=timezone.now() + timedelta(days=1),
                 event_link="https://example.com",
                 attendance_mode="virtual",
-                reference_number=a.reference_number,
+                ref_number=a.ref_number,
             )
 
     def test_event_can_have_many_categories(self):
@@ -128,7 +128,7 @@ class ApiTests(TestCase):
         event = make_event(submitter_name="")
         body = self.client.get(self.events_url).content.decode()
         self.assertNotIn(str(event.manage_key), body)
-        self.assertNotIn(event.reference_number, body)
+        self.assertNotIn(event.ref_number, body)
         self.assertNotIn("sam@example.com", body)
         self.assertNotIn("manage_key", body)
         self.assertEqual(self.client.get(self.events_url).json()[0]["submitter_name"], "Anonymous")
@@ -165,8 +165,8 @@ class ApiTests(TestCase):
         self.assertEqual(response.status_code, 201, response.content)
         body = response.json()
         self.assertEqual(body["status"], "pending")
-        self.assertRegex(body["reference_number"], r"^SW-[0-9A-F]{8}$")
-        event = Event.objects.get(reference_number=body["reference_number"])
+        self.assertRegex(body["ref_number"], r"^SW-[0-9A-F]{8}$")
+        event = Event.objects.get(ref_number=body["ref_number"])
         self.assertEqual(event.status, Event.Status.PENDING)
         self.assertEqual(event.categories.count(), 1)
 
@@ -255,9 +255,9 @@ class ApiTests(TestCase):
         self.assertEqual(len(mail.outbox), 2)
         receipt = next(m for m in mail.outbox if m.to == ["pat@example.com"])
         admin_note = next(m for m in mail.outbox if m.to == ["inbox@streetwise.test"])
-        self.assertIn(event.reference_number, receipt.body)
+        self.assertIn(event.ref_number, receipt.body)
         self.assertIn(f"https://streetwise.test/events/manage#{event.manage_key}", receipt.body)
-        self.assertIn(event.reference_number, admin_note.body)
+        self.assertIn(event.ref_number, admin_note.body)
         self.assertNotIn(str(event.manage_key), admin_note.body)
 
     def test_event_still_saves_when_email_fails(self):
@@ -292,7 +292,7 @@ class SpamProtectionTests(TestCase):
     def test_filled_honeypot_looks_like_success_but_saves_nothing(self):
         response = self.post(fax_number="555-0100")
         self.assertEqual(response.status_code, 201)
-        self.assertRegex(response.json()["reference_number"], r"^SW-[0-9A-F]{8}$")
+        self.assertRegex(response.json()["ref_number"], r"^SW-[0-9A-F]{8}$")
         self.assertEqual(Event.objects.count(), 0)
         self.assertEqual(len(mail.outbox), 0)
 
@@ -369,7 +369,7 @@ class ManageLinkTests(TestCase):
         response = self.get()
         self.assertEqual(response.status_code, 200)
         body = response.json()
-        self.assertEqual(body["reference_number"], self.event.reference_number)
+        self.assertEqual(body["ref_number"], self.event.ref_number)
         self.assertEqual(body["submitter_email"], "sam@example.com")
         self.assertNotIn("manage_key", body)
         self.assertNotIn(self.key, response.content.decode())
@@ -462,7 +462,7 @@ class ManageLinkTests(TestCase):
                 "title": "Fine",
                 "submitter_email": "thief@example.com",
                 "status": "approved",
-                "reference_number": "SW-00000000",
+                "ref_number": "SW-00000000",
                 "manage_key": "00000000-0000-4000-8000-000000000000",
             }
         )
@@ -470,7 +470,7 @@ class ManageLinkTests(TestCase):
         self.event.refresh_from_db()
         self.assertEqual(self.event.submitter_email, "sam@example.com")
         self.assertEqual(self.event.status, Event.Status.PENDING)
-        self.assertNotEqual(self.event.reference_number, "SW-00000000")
+        self.assertNotEqual(self.event.ref_number, "SW-00000000")
         self.assertEqual(str(self.event.manage_key), self.key)
 
     def test_edit_is_validated_like_a_new_submit(self):
@@ -625,7 +625,7 @@ class ReminderCommandTests(TestCase):
         self.age(event, 30)
         mail.outbox.clear()
         out, _ = self.run_command("--dry-run")
-        self.assertIn(event.reference_number, out)
+        self.assertIn(event.ref_number, out)
         self.assertEqual(len(mail.outbox), 0)
         event.refresh_from_db()
         self.assertIsNone(event.reminder_sent_at)
@@ -696,7 +696,7 @@ class AdminTests(TestCase):
         self.assertEqual(event.status, Event.Status.APPROVED)
         self.assertEqual(len(mail.outbox), 1)
         self.assertEqual(mail.outbox[0].to, ["sam@example.com"])
-        self.assertIn(event.reference_number, mail.outbox[0].body)
+        self.assertIn(event.ref_number, mail.outbox[0].body)
 
     def test_reject_action_hides_the_event_and_sends_no_email(self):
         event = make_event()

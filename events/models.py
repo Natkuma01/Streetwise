@@ -39,7 +39,7 @@ class Event(models.Model):
         VIRTUAL = "virtual", "Virtual"
 
     # Public. Safe to show to the submitter and to quote in an email.
-    reference_number = models.CharField(
+    ref_number = models.CharField(
         max_length=16,
         unique=True,
         editable=False,
@@ -81,7 +81,7 @@ class Event(models.Model):
         ordering = ["start_at", "title"]
 
     def __str__(self):
-        return f"{self.title} ({self.reference_number})"
+        return f"{self.title} ({self.ref_number})"
 
     def clean(self):
         super().clean()

@@ -24,7 +24,7 @@ class CategorySerializer(serializers.ModelSerializer):
 class EventSerializer(serializers.ModelSerializer):
     """What the public calendar sees.
 
-    Never includes manage_key, reference_number or submitter_email.
+    Never includes manage_key, ref_number or submitter_email.
     """
 
     start_at = utc_datetime(read_only=True)
@@ -99,7 +99,7 @@ class EventCreatedSerializer(EventSerializer):
     """The response to a successful submit. Adds the reference number."""
 
     class Meta(EventSerializer.Meta):
-        fields = EventSerializer.Meta.fields + ["reference_number"]
+        fields = EventSerializer.Meta.fields + ["ref_number"]
 
 
 class EventManageSerializer(serializers.ModelSerializer):
@@ -117,7 +117,7 @@ class EventManageSerializer(serializers.ModelSerializer):
         model = Event
         fields = [
             "id",
-            "reference_number",
+            "ref_number",
             "title",
             "submitter_email",
             "submitter_name",

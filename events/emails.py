@@ -44,14 +44,14 @@ def send_receipt_email(event):
         f"Thank you for sharing \"{event.title}\" with Streetwise.\n\n"
         "Your event is waiting for review. We aim to approve it within 24 hours.\n"
         "Until then it shows on the calendar in a faded style.\n\n"
-        f"Reference number: {event.reference_number}\n\n"
+        f"Reference number: {event.ref_number}\n\n"
         "Need to fix a detail or cancel? Use your private link:\n"
         f"{manage_link(event)}\n\n"
         "Keep this email. Anyone with that link can change your event, "
         "so please do not forward it."
     )
     return _send(
-        f"We got your event: {event.title} ({event.reference_number})",
+        f"We got your event: {event.title} ({event.ref_number})",
         message,
         event.submitter_email,
     )
@@ -62,13 +62,13 @@ def send_admin_new_event_email(event):
     message = (
         "A new event is waiting for review.\n\n"
         f"Title: {event.title}\n"
-        f"Reference number: {event.reference_number}\n"
+        f"Reference number: {event.ref_number}\n"
         f"Starts: {event.start_at:%Y-%m-%d %H:%M} UTC\n"
         f"Submitted by: {event.submitter_email}\n\n"
         "Review it in Django admin: set its status to Approved or Rejected."
     )
     return _send(
-        f"New event to review: {event.title} ({event.reference_number})",
+        f"New event to review: {event.title} ({event.ref_number})",
         message,
         settings.ADMIN_NOTIFICATION_EMAIL,
     )
@@ -79,12 +79,12 @@ def send_admin_event_edited_email(event):
     message = (
         "An approved event was edited, so it is back in Pending.\n\n"
         f"Title: {event.title}\n"
-        f"Reference number: {event.reference_number}\n"
+        f"Reference number: {event.ref_number}\n"
         f"Starts: {event.start_at:%Y-%m-%d %H:%M} UTC\n\n"
         "Review it in Django admin: set its status to Approved again."
     )
     return _send(
-        f"Edited event needs review: {event.title} ({event.reference_number})",
+        f"Edited event needs review: {event.title} ({event.ref_number})",
         message,
         settings.ADMIN_NOTIFICATION_EMAIL,
     )
@@ -93,7 +93,7 @@ def send_admin_event_edited_email(event):
 def send_pending_reminder_email(events, hours):
     """To the project inbox: one email listing every event waiting too long."""
     lines = [
-        f"- {e.title} ({e.reference_number}), starts {e.start_at:%Y-%m-%d %H:%M} UTC"
+        f"- {e.title} ({e.ref_number}), starts {e.start_at:%Y-%m-%d %H:%M} UTC"
         for e in events
     ]
     count = len(lines)
@@ -120,7 +120,7 @@ def send_approval_email(event):
     message = (
         f"Good news. \"{event.title}\" is approved and now shows clearly "
         "on the Streetwise calendar.\n\n"
-        f"Reference number: {event.reference_number}"
+        f"Reference number: {event.ref_number}"
     )
     return _send(
         f"Your event is live: {event.title}",

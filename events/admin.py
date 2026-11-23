@@ -18,14 +18,14 @@ class EventAdmin(admin.ModelAdmin):
         "start_at",
         "attendance_mode",
         "submitter_email",
-        "reference_number",
+        "ref_number",
         "created_at",
     ]
     list_filter = ["status", "attendance_mode", "categories"]
-    search_fields = ["title", "reference_number", "submitter_email", "submitter_name"]
+    search_fields = ["title", "ref_number", "submitter_email", "submitter_name"]
     filter_horizontal = ["categories"]
     # manage_key is left out on purpose. It is a secret the admin never needs.
-    readonly_fields = ["reference_number", "reminder_sent_at", "created_at", "updated_at"]
+    readonly_fields = ["ref_number", "reminder_sent_at", "created_at", "updated_at"]
     actions = ["approve_events", "reject_events", "cancel_events"]
 
     def get_ordering(self, request):

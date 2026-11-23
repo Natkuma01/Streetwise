@@ -81,11 +81,11 @@ The form needs a hidden trap field called `fax_number`. Real people never see it
 
 - Add an input named `fax_number` to the form and hide it. Use CSS (`position: absolute; left: -9999px`) plus `tabIndex={-1}` and `autoComplete="off"`. Do not use `type="hidden"` or `display: none`, because some bots skip those.
 - Send it with the rest of the body. Leave it as an empty string `""`.
-- If it has any value, the API replies `201` as if it worked, but saves nothing and sends no email. The fake reply has only `status` and `reference_number`, so do not rely on the other fields in the success response.
+- If it has any value, the API replies `201` as if it worked, but saves nothing and sends no email. The fake reply has only `status` and `ref_number`, so do not rely on the other fields in the success response.
 
 There is also a rate limit: **10 submits per hour for each visitor address** (`EVENT_SUBMIT_RATE` in `.env`). The 11th gets `429` with a `Retry-After` header (seconds). Show something kind, like "Too many submissions. Please try again later." Reading the calendar is never limited.
 
-Success is `201` with the saved event plus its `reference_number`, like `SW-A3F19C2B`. Show it on the confirmation screen so the person can quote it in an email.
+Success is `201` with the saved event plus its `ref_number`, like `SW-A3F19C2B`. Show it on the confirmation screen so the person can quote it in an email.
 
 ```json
 {
@@ -99,7 +99,7 @@ Success is `201` with the saved event plus its `reference_number`, like `SW-A3F1
   "categories": [{ "id": 3, "name": "Human Resources" }],
   "submitter_name": "Anonymous",
   "status": "pending",
-  "reference_number": "SW-A3F19C2B"
+  "ref_number": "SW-A3F19C2B"
 }
 ```
 
@@ -132,7 +132,7 @@ There are no accounts. Whoever has the key can change that one event, so tell pe
 
 | Call | What it does |
 | --- | --- |
-| `GET /api/manage/` | Returns the event, with `reference_number` and `submitter_email` too. Use it to fill the edit form. |
+| `GET /api/manage/` | Returns the event, with `ref_number` and `submitter_email` too. Use it to fill the edit form. |
 | `PATCH /api/manage/` | Edits the event. Send only the fields that changed. |
 | `POST /api/manage/cancel/` | Cancels the event. It disappears from the calendar. No body needed. |
 
@@ -150,7 +150,7 @@ The response is the full event, like this:
 ```json
 {
   "id": 7,
-  "reference_number": "SW-A3F19C2B",
+  "ref_number": "SW-A3F19C2B",
   "title": "Resume workshop (new room)",
   "submitter_email": "pat@example.com",
   "submitter_name": "",

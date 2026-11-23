@@ -45,7 +45,7 @@ class Command(BaseCommand):
         if options["dry_run"]:
             self.stdout.write(f"Would remind about {len(waiting)} event(s):")
             for event in waiting:
-                self.stdout.write(f"  {event.reference_number}  {event.title}")
+                self.stdout.write(f"  {event.ref_number}  {event.title}")
             return
 
         if not send_pending_reminder_email(waiting, hours):

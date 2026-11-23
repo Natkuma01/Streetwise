@@ -77,7 +77,7 @@ class EventListCreateView(APIView):
         # the bot thinks it worked and does not try a new trick.
         if isinstance(request.data, dict) and request.data.get(HONEYPOT_FIELD):
             return Response(
-                {"status": Event.Status.PENDING, "reference_number": generate_reference_number()},
+                {"status": Event.Status.PENDING, "ref_number": generate_reference_number()},
                 status=status.HTTP_201_CREATED,
             )
 
